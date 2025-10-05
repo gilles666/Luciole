@@ -6,9 +6,10 @@
   <title>Détecteur Dalmatien</title>
   <style>
     body {
-      font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-      margin:0; display:flex; flex-direction:column; align-items:center; gap:10px;
-      padding:12px; background:#111; color:#fff; min-height:100vh;
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+      margin:0; display:flex; flex-direction:column; align-items:center;
+      gap:10px; padding:12px; background:#111; color:#fff;
+      min-height:100vh; box-sizing:border-box;
     }
     video { width:100%; max-width:640px; border-radius:12px; background:#000; }
     canvas { display:none; }
@@ -16,21 +17,26 @@
       padding:10px 14px; border-radius:8px; border:none;
       background:#0a84ff; color:white; font-weight:600;
     }
+    .row { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
     #status { font-size:0.95rem; opacity:0.9; }
     #label { font-size:1.05rem; font-weight:700; margin-top:6px; }
-    .controls { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
   </style>
 </head>
 <body>
-  <h1>Détecteur Dalmatien v3</h1>
-
+  <h1>Détecteur Dalmatien</h1>
   <video id="video" autoplay playsinline></video>
   <canvas id="snap" width="224" height="224"></canvas>
 
-  <div class="controls">
+  <!-- Boutons principaux -->
+  <div class="row">
     <button id="startBtn">Démarrer</button>
     <button id="stopBtn" disabled>Arrêter</button>
-    <button id="openBtn">Ouvrir la porte</button>
+  </div>
+
+  <!-- Boutons manuels pour la porte -->
+  <div class="row">
+    <button id="openBtn" style="background:#34c759;">🔓 Ouvrir porte</button>
+    <button id="closeBtn" style="background:#ff3b30;">🔒 Fermer porte</button>
   </div>
 
   <div id="status">Statut: attente</div>
@@ -47,14 +53,16 @@
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
     const openBtn = document.getElementById('openBtn');
+    const closeBtn = document.getElementById('closeBtn');
     const statusEl = document.getElementById('status');
     const labelEl = document.getElementById('label');
 
     // --- CONFIG ---
-    const TARGET_URL = 'http://lucioleporte/ouvrir'; // ton URL
+    const URL_OUVRIR = 'http://192.168.1.205/ouvrir';
+    const URL_FERMER = 'http://192.168.1.205/fermer';
     const CHECK_INTERVAL_MS = 700;
     const CONFIDENCE_THRESHOLD = 0.6;
-    const COOLDOWN_MS = 10000; // 10s entre 2 déclenchements
+    const COOLDOWN_MS = 10000; // 10s entre deux déclenchements automatiques
 
     let model = null;
     let stream = null;
@@ -65,7 +73,7 @@
     function setStatus(t){ statusEl.textContent = 'Statut: ' + t; }
 
     async function startCamera(){
-      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+      stream = await navigator.mediaDevices.getUserMedia({ video:{facingMode:'environment'}, audio:false });
       video.srcObject = stream;
       await video.play();
     }
@@ -85,7 +93,7 @@
         osc.connect(gain);
         gain.connect(audioCtx.destination);
         osc.type = 'sine';
-        osc.frequency.value = 880;
+        osc.frequency.value = 880; // Hz
         gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
         osc.start();
         osc.stop(audioCtx.currentTime + 0.2);
@@ -95,7 +103,7 @@
     async function analyzeLoop(){
       if(!running) return;
       try{
-        ctx.drawImage(video, 0, 0, snap.width, snap.height);
+        ctx.drawImage(video,0,0,snap.width,snap.height);
         const results = await model.classify(snap);
         if(results && results.length){
           const top = results[0];
@@ -108,7 +116,7 @@
               lastSentAt = now;
               setStatus('Dalmatien détecté 🐶 → ouverture !');
               beep();
-              sendGet();
+              sendGet(URL_OUVRIR);
             } else {
               setStatus('Dalmatien détecté — cooldown');
             }
@@ -116,17 +124,17 @@
             setStatus('Analyse en cours...');
           }
         }
-      } catch(e){
+      }catch(e){
         console.error('Erreur analyse:', e);
         setStatus('Erreur analyse');
-      } finally{
+      }finally{
         setTimeout(analyzeLoop, CHECK_INTERVAL_MS);
       }
     }
 
-    function sendGet(){
-      fetch(TARGET_URL, { method:'GET', mode:'no-cors' })
-        .then(()=>console.log('GET envoyé à', TARGET_URL))
+    function sendGet(url){
+      fetch(url, { method:'GET', mode:'no-cors' })
+        .then(()=>console.log('GET envoyé à', url))
         .catch(err=>console.error('Erreur GET', err));
     }
 
@@ -137,7 +145,6 @@
         await loadModel();
         running = true;
         stopBtn.disabled = false;
-        setStatus('Analyse en cours...');
         analyzeLoop();
       }catch(e){
         console.error(e);
@@ -159,13 +166,11 @@
       }
     }
 
+    // --- Événements ---
     startBtn.addEventListener('click', startAll);
     stopBtn.addEventListener('click', stopAll);
-    openBtn.addEventListener('click', ()=>{
-      setStatus('Ouverture manuelle 🔓');
-      beep();
-      sendGet();
-    });
+    openBtn.addEventListener('click', ()=>{ setStatus('Ouverture manuelle 🚪'); beep(); sendGet(URL_OUVRIR); });
+    closeBtn.addEventListener('click', ()=>{ setStatus('Fermeture manuelle 🚪'); beep(); sendGet(URL_FERMER); });
   </script>
 </body>
 </html>
