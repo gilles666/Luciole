@@ -63,6 +63,7 @@
     const CHECK_INTERVAL_MS = 700;
     const CONFIDENCE_THRESHOLD = 0.6;
     const COOLDOWN_MS = 10000; // 10s entre deux déclenchements automatiques
+    const TEMPS_FERMETURE_MS = 10000; // 10s après ouverture
 
     let model = null;
     let stream = null;
@@ -99,7 +100,16 @@
         osc.stop(audioCtx.currentTime + 0.2);
       }catch(e){ console.error('Erreur bip:', e); }
     }
-
+    // --- Nouvelle fonction : ouverture puis fermeture automatique ---
+    function ouvrirPuisFermer(){
+      setStatus('Dalmatien détecté 🐶 → ouverture !');
+      beep();
+      sendGet(URL_OUVRIR);
+      setTimeout(()=>{
+        setStatus('Fermeture automatique...');
+        sendGet(URL_FERMER);
+      }, TEMPS_FERMETURE_MS);
+    }
     async function analyzeLoop(){
       if(!running) return;
       try{
@@ -114,9 +124,7 @@
             const now = Date.now();
             if(now - lastSentAt > COOLDOWN_MS){
               lastSentAt = now;
-              setStatus('Dalmatien détecté 🐶 → ouverture !');
-              beep();
-              sendGet(URL_OUVRIR);
+              ouvrirPuisFermer();
             } else {
               setStatus('Dalmatien détecté — cooldown');
             }
