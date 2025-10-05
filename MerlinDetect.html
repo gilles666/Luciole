@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Détecteur Dalmatien</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin:0; display:flex; flex-direction:column; align-items:center; gap:10px; padding:12px; background:#111; color:#fff; min-height:100vh; box-sizing:border-box;}
+    video { width:100%; max-width:640px; border-radius:12px; background:#000; }
+    canvas { display:none; }
+    .controls { display:flex; gap:8px; }
+    button { padding:10px 14px; border-radius:8px; border:none; background:#0a84ff; color:white; font-weight:600; }
+    #status { font-size:0.95rem; opacity:0.9; }
+    #label { font-size:1.05rem; font-weight:700; margin-top:6px; }
+  </style>
+</head>
+<body>
+  <h1>Détecteur Dalmatien</h1>
+  <video id="video" autoplay playsinline ></video>
+  <canvas id="snap" width="224" height="224"></canvas>
+
+  <div class="controls">
+    <button id="startBtn">Démarrer</button>
+    <button id="stopBtn" disabled>Arrêter</button>
+  </div>
+
+  <div id="status">Statut: attente</div>
+  <div id="label"></div>
+
+  <!-- TensorFlow.js et MobileNet -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.12.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.2.1/dist/mobilenet.min.js"></script>
+
+  <script>
+    const video = document.getElementById('video');
+    const snap = document.getElementById('snap');
+    const ctx = snap.getContext('2d');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const statusEl = document.getElementById('status');
+    const labelEl = document.getElementById('label');
+
+    // --- CONFIG ---
+    const CHECK_INTERVAL_MS = 700; // fréquence d'analyse
+    const CONFIDENCE_THRESHOLD = 0.60; // seuil min pour considérer "Dalmatian"
+    const COOLDOWN_MS = 10_000; // temps minimal entre deux appels GET (éviter spam)
+    const TARGET_URL = 'https://example.com/alert'; // <-- mettre l'URL à appeler (GET)
+    const SEND_PARAMS = true; // si true on envoie confidence & label en query
+
+    let model = null;
+    let stream = null;
+    let running = false;
+    let lastSentAt = 0;
+
+    // helper : met à jour statut
+    function setStatus(t) { statusEl.textContent = 'Statut: ' + t; }
+
+    async function startCamera() {
+      if (stream) return;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+        video.srcObject = stream;
+        await video.play();
+      } catch (e) {
+        console.error('Erreur accès caméra:', e);
+        setStatus('Erreur accès caméra. Vérifiez permissions et HTTPS.');
+        throw e;
+      }
+    }
+
+    async function loadModel() {
+      setStatus('Chargement modèle MobileNet...');
+      // On charge mobilenet v2 (pratique pour ImageNet classes)
+      model = await mobilenet.load({ version: 2, alpha: 1.0 });
+      setStatus('Modèle chargé');
+    }
+
+    async function analyzeLoop() {
+      if (!running) return;
+      try {
+        // prendre un frame redimensionné dans canvas
+        const w = snap.width, h = snap.height;
+        ctx.drawImage(video, 0, 0, w, h);
+        // mobilenet.classify peut accepter canvas
+        const results = await model.classify(snap);
+        // results = [ {className: 'dalmatian', probability: 0.8}, ... ]
+        if (results && results.length > 0) {
+          const top = results[0];
+          labelEl.textContent = `${top.className} — ${(top.probability*100).toFixed(1)}%`;
+          // recherche du mot "dalmatian" (sensibilité linguistique anglo/fr)
+          const name = top.className.toLowerCase();
+          const isDalmatian = name.includes('dalmatian') || name.includes('dalmatien') || name.includes('dalmat');
+          if (isDalmatian && top.probability >= CONFIDENCE_THRESHOLD) {
+            const now = Date.now();
+            if (now - lastSentAt > COOLDOWN_MS) {
+              lastSentAt = now;
+              setStatus('Dalmatien détecté — envoi GET...');
+              sendGet(top);
+            } else {
+              setStatus('Dalmatien détecté — cooldown actif');
+            }
+          } else {
+            setStatus('Analyse en cours — pas de dalmatien détecté');
+          }
+        }
+      } catch (e) {
+        console.error('Erreur analyse:', e);
+        setStatus('Erreur pendant l\'analyse (console pour détails)');
+      } finally {
+        setTimeout(analyzeLoop, CHECK_INTERVAL_MS);
+      }
+    }
+
+    function sendGet(topResult) {
+      try {
+        let url = TARGET_URL;
+        if (SEND_PARAMS) {
+          const q = new URLSearchParams({
+            label: topResult.className,
+            confidence: topResult.probability.toFixed(4),
+            ts: new Date().toISOString()
+          });
+          url += (url.includes('?') ? '&' : '?') + q.toString();
+        }
+        // GET request simple
+        fetch(url, { method: 'GET', mode: 'cors' })
+          .then(r => {
+            setStatus('GET envoyé — HTTP ' + r.status);
+            console.log('GET response', r);
+          })
+          .catch(err => {
+            setStatus('Erreur envoi GET');
+            console.error('Erreur fetch GET:', err);
+          });
+      } catch (e) {
+        console.error('sendGet error', e);
+      }
+    }
+
+    async function startAll() {
+      startBtn.disabled = true;
+      try {
+        setStatus('Démarrage caméra + modèle...');
+        await startCamera();
+        if (!model) await loadModel();
+        running = true;
+        stopBtn.disabled = false;
+        setStatus('En attente analyse...');
+        analyzeLoop();
+      } catch (e) {
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+      }
+    }
+
+    function stopAll() {
+      running = false;
+      stopBtn.disabled = true;
+      startBtn.disabled = false;
+      labelEl.textContent = '';
+      setStatus('Arrêté');
+      if (stream) {
+        // stop all tracks
+        stream.getTracks().forEach(t => t.stop());
+        stream = null;
+        video.srcObject = null;
+      }
+    }
+
+    // boutons
+    startBtn.addEventListener('click', () => {
+      // iOS req user gesture to start camera / audio; bouton ici c'est OK
+      startAll();
+    });
+    stopBtn.addEventListener('click', stopAll);
+
+    // prévention : quitter proprement quand onglet caché
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        // optionnel : arrêter pour économie batterie
+        // stopAll();
+      }
+    });
+
+    // conseils utiles pour dev : ouvrir console distant via Safari devtools (Mac) pour debug
+  </script>
+</body>
+</html>
+
