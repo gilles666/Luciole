@@ -3,32 +3,28 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Détecteur Dalmatien v1</title>
+  <title>Détecteur Dalmatien</title>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin:0; display:flex; flex-direction:column; align-items:center; gap:10px; padding:12px; background:#111; color:#fff; min-height:100vh; box-sizing:border-box;}
+    body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; margin:0; display:flex; flex-direction:column; align-items:center; gap:10px; padding:12px; background:#111; color:#fff; min-height:100vh; box-sizing:border-box;}
     video { width:100%; max-width:640px; border-radius:12px; background:#000; }
     canvas { display:none; }
-    .controls { display:flex; gap:8px; }
     button { padding:10px 14px; border-radius:8px; border:none; background:#0a84ff; color:white; font-weight:600; }
     #status { font-size:0.95rem; opacity:0.9; }
     #label { font-size:1.05rem; font-weight:700; margin-top:6px; }
   </style>
 </head>
 <body>
-  <h1>Détecteur Dalmatien v1</h1>
-  <a href="https://storage.googleapis.com/tfjs-models/savedmodel/mobilenet_v2_1.0_224/model.json">MobileNet</a>
-  <video id="video" autoplay playsinline ></video>
+  <h1>Détecteur Dalmatien v2</h1>
+  <video id="video" autoplay playsinline></video>
   <canvas id="snap" width="224" height="224"></canvas>
-
-  <div class="controls">
+  <div>
     <button id="startBtn">Démarrer</button>
     <button id="stopBtn" disabled>Arrêter</button>
   </div>
-
   <div id="status">Statut: attente</div>
   <div id="label"></div>
 
-  <!-- TensorFlow.js et MobileNet -->
+  <!-- TensorFlow.js + MobileNet -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.21.0/dist/tf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.0/dist/mobilenet.min.js"></script>
 
@@ -42,189 +38,115 @@
     const labelEl = document.getElementById('label');
 
     // --- CONFIG ---
-    const CHECK_INTERVAL_MS = 700; // fréquence d'analyse
-    const CONFIDENCE_THRESHOLD = 0.60; // seuil min pour considérer "Dalmatian"
-    const COOLDOWN_MS = 10_000; // temps minimal entre deux appels GET (éviter spam)
-    const TARGET_URL = 'https://example.com/alert'; // <-- mettre l'URL à appeler (GET)
-    const SEND_PARAMS = true; // si true on envoie confidence & label en query
+    const TARGET_URL = 'http://lucioleporte/ouvrir'; // ton URL
+    const CHECK_INTERVAL_MS = 700;
+    const CONFIDENCE_THRESHOLD = 0.6;
+    const COOLDOWN_MS = 10000; // 10s entre 2 déclenchements
 
     let model = null;
     let stream = null;
     let running = false;
     let lastSentAt = 0;
+    let audioCtx;
 
-    // helper : met à jour statut
-    function setStatus(t) { statusEl.textContent = 'Statut: ' + t; }
+    function setStatus(t){ statusEl.textContent = 'Statut: ' + t; }
 
-    async function startCamera() {
-      if (stream) return;
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
-        video.srcObject = stream;
-        await video.play();
-      } catch (e) {
-        console.error('Erreur accès caméra:', e);
-        setStatus('Erreur accès caméra. Vérifiez permissions et HTTPS.');
-        throw e;
-      }
+    async function startCamera(){
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+      video.srcObject = stream;
+      await video.play();
     }
 
-  async function loadModel() {
-    setStatus('Chargement modèle MobileNet...');
-    try {
-      // S'assure que TF est prêt
+    async function loadModel(){
+      setStatus('Chargement modèle MobileNet...');
       await tf.ready();
-
-      // Optionnel : force le backend (webgl d’abord, sinon wasm si tu ajoutes le backend wasm)
-      const backends = tf.getBackend();
-      console.log('Backend TF actuel:', backends);
-
-      // Tentative 1 : chargement normal
       model = await mobilenet.load({ version: 2, alpha: 1.0 });
       setStatus('Modèle chargé ✅');
-      console.log('MobileNet chargé (jsDelivr).');
-      return;
-    } catch (e1) {
-      console.error('Échec chargement MobileNet (jsDelivr):', e1);
-      setStatus('Échec via jsDelivr, nouvelle tentative…');
     }
 
-    try {
-      // Fallback : recharge les scripts depuis un autre CDN (unpkg)
-      // ⚠️ Cela ne marche que si la page n’est pas en CSP stricte qui bloque eval/dynamique.
-      await injectScript('https://unpkg.com/@tensorflow/tfjs@3.21.0/dist/tf.min.js');
-      await injectScript('https://unpkg.com/@tensorflow-models/mobilenet@2.1.0/dist/mobilenet.min.js');
-
-      await tf.ready();
-      model = await mobilenet.load({ version: 2, alpha: 1.0 });
-      setStatus('Modèle chargé ✅ (fallback unpkg)');
-      console.log('MobileNet chargé (unpkg).');
-    } catch (e2) {
-      console.error('Échec chargement MobileNet (fallback unpkg):', e2);
-      setStatus('Erreur: impossible de charger le modèle. Voir console.');
-      alert('Impossible de charger MobileNet.\nVérifie la connexion, les bloqueurs, et HTTPS.');
+    function beep(){
+      try{
+        if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.type = 'sine';
+        osc.frequency.value = 880; // Hz
+        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.2);
+      }catch(e){ console.error('Erreur bip:', e); }
     }
-  }
 
-  // utilitaire pour injecter un script dynamiquement
-  function injectScript(src) {
-    return new Promise((resolve, reject) => {
-      const s = document.createElement('script');
-      s.src = src;
-      s.onload = () => resolve();
-      s.onerror = () => reject(new Error('Erreur chargement script: ' + src));
-      document.head.appendChild(s);
-    });
-  }
-    async function analyzeLoop() {
-      if (!running) return;
-      try {
-        // prendre un frame redimensionné dans canvas
-        const w = snap.width, h = snap.height;
-        ctx.drawImage(video, 0, 0, w, h);
-        // mobilenet.classify peut accepter canvas
+    async function analyzeLoop(){
+      if(!running) return;
+      try{
+        ctx.drawImage(video, 0, 0, snap.width, snap.height);
         const results = await model.classify(snap);
-        // results = [ {className: 'dalmatian', probability: 0.8}, ... ]
-        if (results && results.length > 0) {
+        if(results && results.length){
           const top = results[0];
           labelEl.textContent = `${top.className} — ${(top.probability*100).toFixed(1)}%`;
-          // recherche du mot "dalmatian" (sensibilité linguistique anglo/fr)
           const name = top.className.toLowerCase();
-          const isDalmatian = name.includes('dalmatian') || name.includes('dalmatien') || name.includes('dalmat');
-          if (isDalmatian && top.probability >= CONFIDENCE_THRESHOLD) {
+          const isDalmatian = name.includes('dalmatian') || name.includes('dalmatien');
+          if(isDalmatian && top.probability >= CONFIDENCE_THRESHOLD){
             const now = Date.now();
-            if (now - lastSentAt > COOLDOWN_MS) {
+            if(now - lastSentAt > COOLDOWN_MS){
               lastSentAt = now;
-              setStatus('Dalmatien détecté — envoi GET...');
-              sendGet(top);
+              setStatus('Dalmatien détecté 🐶 → ouverture !');
+              beep();
+              sendGet();
             } else {
-              setStatus('Dalmatien détecté — cooldown actif');
+              setStatus('Dalmatien détecté — cooldown');
             }
           } else {
-            setStatus('Analyse en cours — pas de dalmatien détecté');
+            setStatus('Analyse en cours...');
           }
         }
-      } catch (e) {
+      } catch(e){
         console.error('Erreur analyse:', e);
-        setStatus('Erreur pendant l\'analyse (console pour détails)');
-      } finally {
+        setStatus('Erreur analyse');
+      } finally{
         setTimeout(analyzeLoop, CHECK_INTERVAL_MS);
       }
     }
 
-    function sendGet(topResult) {
-      try {
-        let url = TARGET_URL;
-        if (SEND_PARAMS) {
-          const q = new URLSearchParams({
-            label: topResult.className,
-            confidence: topResult.probability.toFixed(4),
-            ts: new Date().toISOString()
-          });
-          url += (url.includes('?') ? '&' : '?') + q.toString();
-        }
-        // GET request simple
-        fetch(url, { method: 'GET', mode: 'cors' })
-          .then(r => {
-            setStatus('GET envoyé — HTTP ' + r.status);
-            console.log('GET response', r);
-          })
-          .catch(err => {
-            setStatus('Erreur envoi GET');
-            console.error('Erreur fetch GET:', err);
-          });
-      } catch (e) {
-        console.error('sendGet error', e);
-      }
+    function sendGet(){
+      fetch(TARGET_URL, { method:'GET', mode:'no-cors' })
+        .then(()=>console.log('GET envoyé à', TARGET_URL))
+        .catch(err=>console.error('Erreur GET', err));
     }
 
-    async function startAll() {
+    async function startAll(){
       startBtn.disabled = true;
-      try {
-        setStatus('Démarrage caméra + modèle...');
+      try{
         await startCamera();
-        if (!model) await loadModel();
+        await loadModel();
         running = true;
         stopBtn.disabled = false;
-        setStatus('En attente analyse...');
         analyzeLoop();
-      } catch (e) {
+      }catch(e){
+        console.error(e);
+        setStatus('Erreur démarrage');
         startBtn.disabled = false;
-        stopBtn.disabled = true;
       }
     }
 
-    function stopAll() {
+    function stopAll(){
       running = false;
       stopBtn.disabled = true;
       startBtn.disabled = false;
       labelEl.textContent = '';
       setStatus('Arrêté');
-      if (stream) {
-        // stop all tracks
-        stream.getTracks().forEach(t => t.stop());
+      if(stream){
+        stream.getTracks().forEach(t=>t.stop());
         stream = null;
         video.srcObject = null;
       }
     }
 
-    // boutons
-    startBtn.addEventListener('click', () => {
-      // iOS req user gesture to start camera / audio; bouton ici c'est OK
-      startAll();
-    });
+    startBtn.addEventListener('click', startAll);
     stopBtn.addEventListener('click', stopAll);
-
-    // prévention : quitter proprement quand onglet caché
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) {
-        // optionnel : arrêter pour économie batterie
-        // stopAll();
-      }
-    });
-
-    // conseils utiles pour dev : ouvrir console distant via Safari devtools (Mac) pour debug
   </script>
 </body>
 </html>
-
