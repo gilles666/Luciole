@@ -23,7 +23,7 @@
   </style>
 </head>
 <body>
-  <h1>Détecteur Dalmatien</h1>
+  <h1>Détecteur Dalmatien v4</h1>
   <video id="video" autoplay playsinline></video>
   <canvas id="snap" width="224" height="224"></canvas>
 
@@ -58,8 +58,8 @@
     const labelEl = document.getElementById('label');
 
     // --- CONFIG ---
-    const URL_OUVRIR = 'http://192.168.1.205/ouvrir';
-    const URL_FERMER = 'http://192.168.1.205/fermer';
+    const URL_OUVRIR = 'http://lucioleporte.local/ouvrir';
+    const URL_FERMER = 'http://lucioleporte.local/fermer';
     const CHECK_INTERVAL_MS = 700;
     const CONFIDENCE_THRESHOLD = 0.6;
     const COOLDOWN_MS = 10000; // 10s entre deux déclenchements automatiques
