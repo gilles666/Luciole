@@ -119,7 +119,7 @@
           const top = results[0];
           labelEl.textContent = `${top.className} — ${(top.probability*100).toFixed(1)}%`;
           const name = top.className.toLowerCase();
-          const isDalmatian = name.includes('dalmatian') || name.includes('dalmatien');
+          const isDalmatian = name.includes('dalmatian') || name.includes('dalmatien')|| name.includes('setter')|| name.includes('egypt');
           if(isDalmatian && top.probability >= CONFIDENCE_THRESHOLD){
             const now = Date.now();
             if(now - lastSentAt > COOLDOWN_MS){
